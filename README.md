@@ -8,18 +8,29 @@ Queries may be overcomplicated, so my task is also to simplify them.
 # Queries:
 # -- 1 --
 SELECT
+
 Name,
+
 COUNT(*) AS Number,
+
 MIN(Class) AS BestClass
+
 FROM Badges
+
 GROUP BY Name
+
 ORDER BY Number DESC
+
 LIMIT 10
 # -- 2 --
 SELECT Location, COUNT(*) AS Count
+
 FROM (
+
 SELECT Posts.OwnerUserId, Users.Id, Users.Location
+
 FROM Users
+
 JOIN Posts ON Users.Id = Posts.OwnerUserId
 )
 WHERE Location NOT IN ('')
