@@ -1,0 +1,445 @@
+install.packages("microbenchmark")
+install.packages("dplyr")
+install.packages("data.table")
+library(microbenchmark)
+library(dplyr)
+library(data.table)
+
+Badges<-read.csv(file = 'badges.csv')
+Users<-read.csv(file = 'Users.csv')
+Posts<-read.csv(file = 'Posts.csv')
+Votes<-read.csv(file = 'Votes.csv')
+
+# testing microbenchmark 
+
+bench1 <- microbenchmark(sql = {sqldf("SELECT
+                    Name,
+                                      COUNT(*) AS Number,
+                                      MIN(Class) AS BestClass
+                                      FROM Badges
+                                      GROUP BY Name
+                                      ORDER BY Number DESC
+                                      LIMIT 10")},
+                         base={badges <- Badges[,c("Name","Class")]
+                         
+                         
+                         splitted <- split(badges, badges$Name)
+                         
+                         agg1 <- lapply(splitted,FUN = function(x) x[which.min(x$Class), ])
+                         agg2 <- lapply(splitted,FUN = function(x) nrow(x))
+                         tmp1<-do.call(rbind.data.frame,agg1)
+                         tmp2<-do.call(rbind.data.frame,agg2)
+                         colnames(tmp2)<-c("Count")
+                         
+                         tmp1$ID <- seq.int(nrow(tmp1))
+                         
+                         tmp2$ID <- seq.int(nrow(tmp2))
+                         
+                         T1Base<-merge(tmp1,tmp2,by="ID")
+                         
+                         T1Base<-T1Base[,c("Name","Count","Class")]
+                         
+                         T1Base<-T1Base[order(-T1Base$Count),]
+                         
+                         T1Base <- T1Base[1:10,]
+                        },
+                        dyplyr = {Badges %>%
+                            group_by(Name) %>%
+                            summarise(Number=n(),BestClass=min(Class)) %>%
+                            arrange(desc(Number)) %>%
+                            head(10)},
+                        table = {badges <- data.table(Badges)
+                          res<- badges[,list(Number=.N,BestClass=min(Class)),by="Name"]
+                        res <- res[order(-Number),,]
+                        res <- head(res,10)}
+                        )
+
+
+
+
+bench2 <- microbenchmark(sql = {sqldf("SELECT Location, COUNT(*) AS Count
+                FROM (
+                SELECT Posts.OwnerUserId, Users.Id, Users.Location
+                FROM Users
+                JOIN Posts ON Users.Id = Posts.OwnerUserId
+                )
+                WHERE Location NOT IN ('')
+                GROUP BY Location
+                ORDER BY Count DESC
+                LIMIT 10")},
+                         base={posts <- Posts[,c("OwnerUserId","Score")]
+                         
+                         colnames(posts)[1]<-"Id"
+                         
+                         users <- Users[,c("Id","Location")]
+                         
+                         innerT2<-merge(posts,users,by="Id")
+                         
+                         innerT2<-innerT2[,c("Id","Location")]
+                         
+                         outerT2<-innerT2[innerT2$Location!='',]
+                         
+                         splitted<-split(outerT2, outerT2$Location)
+                         agg <- lapply(splitted,FUN = function(x) nrow(x))
+                         tmp<-do.call(rbind.data.frame,agg)
+                         tmp<-tmp[tmp$c.0L..0L..0L..0L..1L..0L..0L..1L..1L..1L..6L..22L..0L..1L..0L..!=0,]
+                         tmp<-data.frame(tmp)
+                         
+                         agg1 <- lapply(splitted,FUN = function(x) x[which.min(x$Id), ])
+                         tmp2<-do.call(rbind.data.frame,agg1)
+                         
+                         tmp$ID <- seq.int(nrow(tmp))
+                         
+                         tmp2$ID <- seq.int(nrow(tmp2))
+                         
+                         T2Base<-merge(tmp,tmp2,by="ID")
+                         
+                         T2Base<-T2Base[,c("Location","tmp")]
+                         T2Base<-T2Base[order(-T2Base$tmp),]
+                         T2Base<-T2Base[1:10,]
+                         },
+                         dyplyr = {InnerT2 <- Users %>%
+                           select(Id,Location) %>%
+                           inner_join(Posts,by=c("Id"="OwnerUserId"))
+                         
+                         T2Dplyr <- InnerT2 %>%
+                           group_by(Location) %>%
+                           summarise(Count=n()) %>%
+                           filter(!Location %in% '') %>%
+                           arrange(desc(Count)) %>%
+                           head(10)},
+                         table = {users <- data.table(Users)
+                         posts <- data.table(Posts)
+                         badges <- data.table(Badges)
+                         votes<-data.table(Votes)
+                         
+                         postsIds <- posts[,list(OwnerUserId),]
+                         
+                         usersSmaller <- users[,list(Id,Location),]
+                         
+                         innerTable2 <- usersSmaller[postsIds,on=list(Id==OwnerUserId),nomatch=0]
+                         
+                         outerTable2<- innerTable2[Location!='',,]
+                         outerTable2<-outerTable2[,list(Count=.N),by="Location"]
+                         outerTable2<-outerTable2[order(-Count),,]
+                         outerTable2<-head(outerTable2,10)}
+)
+
+bench3 <- microbenchmark(sql = {sqldf("SELECT
+                Users.AccountId,
+                Users.DisplayName,
+                Users.Location,
+                AVG(PostAuth.AnswersCount) as AverageAnswersCount
+                FROM
+                (
+                SELECT
+                AnsCount.AnswersCount,
+                Posts.Id,
+                Posts.OwnerUserId
+                FROM (
+                SELECT Posts.ParentId, COUNT(*) AS AnswersCount
+                FROM Posts
+                WHERE Posts.PostTypeId = 2
+                GROUP BY Posts.ParentId
+                ) AS AnsCount
+                JOIN Posts ON Posts.Id = AnsCount.ParentId
+                ) AS PostAuth
+                JOIN Users ON Users.AccountId=PostAuth.OwnerUserId
+                GROUP BY OwnerUserId
+                ORDER BY AverageAnswersCount DESC
+                LIMIT 10")},
+                         base={posts3 <- Posts[,c("ParentId","PostTypeId")]
+                         
+                         posts3<-posts3[posts3$PostTypeId==2,]
+                         
+                         posts3tmp<-Posts[,c("Id","OwnerUserId")]
+                         
+                         splitted <- split(posts3, posts3$ParentId)
+                         
+                         agg <- lapply(splitted,FUN = function(x) nrow(x))
+                         
+                         agg2 <- lapply(splitted,FUN = function(x) x[which.min(x$PostTypeId), ])
+                         
+                         tmp<-do.call(rbind.data.frame,agg)
+                         
+                         tmp2<-do.call(rbind.data.frame,agg2)
+                         
+                         tmp$ID <- seq.int(nrow(tmp))
+                         
+                         tmp2$ID <- seq.int(nrow(tmp2))
+                         
+                         T3Inner<-merge(tmp,tmp2,by="ID")
+                         
+                         colnames(T3Inner)[2]<-"Count"
+                         
+                         T3Inner<-T3Inner[,c("ParentId","Count")]
+                         
+                         colnames(T3Inner)[1]<-"Id"
+                         
+                         PostAuth<-merge(T3Inner,posts3tmp,by="Id")
+                         
+                         colnames(PostAuth)[3]<-"AccountId"
+                         
+                         users3Base<-Users[,c("AccountId","DisplayName","Location")]
+                         
+                         T3BeforeSplit<-merge(users3Base,PostAuth,by="AccountId")
+                         
+                         T3BeforeSplit<-T3BeforeSplit[,c("AccountId","DisplayName","Location","Count")]
+                         
+                         by.Count <- by(T3BeforeSplit, T3BeforeSplit$AccountId, FUN = function(x) colMeans(x[4]))
+                         
+                         splitted<-split(T3BeforeSplit, T3BeforeSplit$AccountId)
+                         
+                         agg3 <- lapply(splitted,FUN = function(x) colMeans(x[4]))
+                         
+                         agg4 <- lapply(splitted,FUN = function(x) x[which.min(x$AccountId), ])
+                         
+                         tmp3<-do.call(rbind.data.frame,agg3)
+                         
+                         tmp4<-do.call(rbind.data.frame,agg4)
+                         
+                         tmp3$ID <- seq.int(nrow(tmp3))
+                         
+                         tmp4$ID <- seq.int(nrow(tmp4))
+                         
+                         T3Base<-merge(tmp3,tmp4,by="ID")
+                         
+                         colnames(T3Base)[2]<-"AverageAnswersCount"
+                         
+                         T3Base<-T3Base[,c("AccountId","DisplayName","Location","AverageAnswersCount")]
+                         
+                         T3Base<-T3Base[order(-T3Base$AverageAnswersCount,-T3Base$AccountId),]
+                         
+                         T3Base$AverageAnswersCount<-as.character(T3Base$AverageAnswersCount)
+                         
+                         T3Base<-T3Base[1:10,]
+                         },
+                         dyplyr = {InnerInnerT3 <- Posts %>%
+                           group_by(ParentId) %>%
+                           filter(PostTypeId==2) %>%
+                           summarise(AnswersCount=n())
+                         
+                         InnerT3 <- InnerInnerT3 %>%
+                           inner_join(select(Posts, Id, OwnerUserId),by=c("ParentId"="Id"))
+                         
+                         T3Dplyr <- InnerT3 %>%
+                           inner_join(select(Users,DisplayName,AccountId,Location),by=c("OwnerUserId"="AccountId"))%>%
+                           group_by(OwnerUserId,DisplayName,Location)%>%
+                           summarise(AverageAnswersCount=mean(AnswersCount))%>%
+                           arrange(desc(AverageAnswersCount),desc(OwnerUserId)) %>%
+                           head(10)
+                         
+                         T3Dplyr<-rename(T3Dplyr,AccountId=OwnerUserId)},
+                         table = {users <- data.table(Users)
+                         posts <- data.table(Posts)
+                         badges <- data.table(Badges)
+                         votes<-data.table(Votes)
+                           
+                           AnsCount <- posts[,list(ParentId,PostTypeId),]
+                         AnsCount <- AnsCount[PostTypeId==2,,]
+                         AnsCount <- AnsCount[,list(AnswerCount=.N),by="ParentId"]
+                         
+                         
+                         postsIdOwner <- posts[,list(Id,OwnerUserId),]
+                         
+                         PostAuth<- postsIdOwner[AnsCount,on=list(Id==ParentId),nomatch=0]
+                         
+                         users3<-users[,list(AccountId,DisplayName,Location),]
+                         
+                         outerTable3 <- PostAuth[users3,on=list(OwnerUserId==AccountId),nomatch=0]
+                         
+                         outerTable3 <- outerTable3[,list(AverageAnswersCount=mean(AnswerCount)),by=list(OwnerUserId,DisplayName,Location)]
+                         outerTable3<- outerTable3[order(-AverageAnswersCount,-OwnerUserId),,]
+                         outerTable3<-head(outerTable3,10)
+                         setnames(outerTable3,"OwnerUserId","AccountId")}
+)
+
+bench4 <- microbenchmark(sql = {sqldf("SELECT
+Posts.Title,
+                                      UpVotesPerYear.Year,
+                                      MAX(UpVotesPerYear.Count) AS Count
+                                      FROM (
+                                      SELECT
+                                      PostId,
+                                      COUNT(*) AS Count,
+                                      STRFTIME('%Y', Votes.CreationDate) AS Year
+                                      FROM Votes
+                                      WHERE VoteTypeId=2
+                                      GROUP BY PostId, Year
+                                      ) AS UpVotesPerYear
+                                      JOIN Posts ON Posts.Id=UpVotesPerYear.PostId
+                                      WHERE Posts.PostTypeId=1
+                                      GROUP BY Year
+                                      ORDER BY Year ASC")},
+                         base={votes<-Votes[,c("PostId","VoteTypeId","CreationDate")]
+                         
+                         votes<-votes[votes$VoteTypeId==2,]
+                         
+                         votes$Year<-strftime(votes$CreationDate,format = '%Y')
+                         
+                         votes<-votes[,c("PostId","Year")]
+                         
+                         by.Count <- by(votes, list(votes$PostId,votes$Year), FUN = function(x) nrow(x))
+                         
+                         
+                         splitted <- split(votes, list(votes$PostId,votes$Year))
+                         
+                         agg <- lapply(splitted,FUN = function(x) nrow(x))
+                         
+                         agg2 <- lapply(splitted,FUN = function(x) x[which.min(x$PostId), ])
+                         
+                         tmp<-do.call(rbind.data.frame,agg)
+                         
+                         tmp2<-do.call(rbind.data.frame,agg2)
+                         
+                         tmp$ID <- seq.int(nrow(tmp))
+                         
+                         colnames(tmp)[1]<-"Count"
+                         
+                         tmp<-tmp[tmp$Count!=0,]
+                         
+                         tmp$ID <- seq.int(nrow(tmp))
+                         
+                         tmp2$ID <- seq.int(nrow(tmp2))
+                         
+                         T4Inner<-merge(tmp,tmp2,by="ID")
+                         
+                         T4Inner<-T4Inner[,c("PostId","Count","Year")]
+                         
+                         T4Inner<-T4Inner[order(T4Inner$PostId,T4Inner$Year),]
+                         
+                         colnames(T4Inner)[1]<-"Id"
+                         
+                         postsT4<-Posts[Posts$PostTypeId==1,]
+                         
+                         postsT4<-postsT4[,c("Title","Id")]
+                         
+                         merged <- merge(postsT4,T4Inner,by="Id")
+                         
+                         merged<-merged[,c("Title","Year","Count")]
+                         
+                         splitted <- split(merged, merged$Year)
+                         
+                         agg <- lapply(splitted,FUN = function(x) x[which.max(x$Count), ])
+                         
+                         tmp<-do.call(rbind.data.frame,agg)
+                         },
+                         dyplyr = {T4Inner<-Votes %>%
+                           filter(VoteTypeId=='2') %>%
+                           mutate(Year=strftime(CreationDate,format = '%Y')) %>%
+                           group_by(PostId,Year)%>%
+                           summarise(Count=n())
+                         
+                         T4Helper <- T4Inner %>%
+                           inner_join(select(Posts,Title,PostTypeId,Id)%>%filter(PostTypeId==1),by=c("PostId"="Id"))%>%
+                           select(-PostTypeId)
+                         
+                         T4Helper2 <- T4Helper%>%
+                           ungroup()%>%
+                           select(-PostId)
+                         
+                         T4Helper3 <- T4Helper2 %>%
+                           group_by(Year,Title)%>%
+                           mutate(Count=max(Count))
+                         
+                         T4almost <- T4Inner %>%
+                           inner_join(select(Posts,Title,PostTypeId,Id),by=c("PostId"="Id")) %>%
+                           filter(PostTypeId==1) %>%
+                           group_by(Year)%>%
+                           summarise(Count=max(Count))%>%
+                           arrange(Year)
+                         
+                         T4Dplyr <- T4almost%>%
+                           inner_join(T4Helper3)
+                         
+                         T4Dplyr <- T4Dplyr%>%
+                           select(Title,Year,Count)},
+                         table = {votes<-data.table(Votes)
+                         
+                         UpVotesPerYear<-votes[,list(PostId,VoteTypeId,Year=strftime(CreationDate,format = '%Y')),]
+                         UpVotesPerYear<-UpVotesPerYear[VoteTypeId==2,,]
+                         UpVotesPerYear<-UpVotesPerYear[,list(Count=.N),by=list(PostId,Year)]
+                         
+                         postsTitleId<-posts[PostTypeId==1,list(Title,Id),]
+                         
+                         outerTable4 <- postsTitleId[UpVotesPerYear,on=list(Id==PostId),nomatch=0]
+                         
+                         postsHelper<-outerTable4[,list(Title,Year,Count),]
+                         
+                         outerTable4 <-postsHelper[,list(Count=max(Count)),by="Year"]
+                         
+                         outerTable4 <- outerTable4[order(Year),,]
+                         
+                         outerTable4 <- outerTable4[postsHelper,on=list(Year,Count),nomatch=0]
+                         
+                         outerTable4 <- outerTable4[,list(Title,Year,Count),]}
+)
+
+bench5 <- microbenchmark(sql = {sqldf("SELECT
+Posts.Title,
+                                     VotesByAge2.OldVotes
+                                     FROM Posts
+                                     JOIN (
+                                     SELECT
+                                     PostId,
+                                     MAX(CASE WHEN VoteDate = 'new' THEN Total ELSE 0 END) NewVotes,
+                                     MAX(CASE WHEN VoteDate = 'old' THEN Total ELSE 0 END) OldVotes,
+                                     SUM(Total) AS Votes
+                                     FROM (
+                                     SELECT
+                                     PostId,
+                                     CASE STRFTIME('%Y', CreationDate)
+                                     WHEN '2021' THEN 'new'
+                                     WHEN '2020' THEN 'new'
+                                     ELSE 'old'
+                                     END VoteDate,
+                                     COUNT(*) AS Total
+                                     FROM Votes
+                                     WHERE VoteTypeId IN (1, 2, 5)
+                                     GROUP BY PostId, VoteDate
+                                     ) AS VotesByAge
+                                     GROUP BY VotesByAge.PostId
+                                     HAVING NewVotes=0
+                                     ) AS VotesByAge2 ON VotesByAge2.PostId=Posts.ID
+                                     WHERE Posts.PostTypeId=1
+                                     ORDER BY VotesByAge2.OldVotes DESC
+                                     LIMIT 10")},
+      
+                         dyplyr = {VotesByAge<-Votes%>%
+                           filter(VoteTypeId==1|VoteTypeId==2|VoteTypeId==5)%>%
+                           mutate(VoteDate=case_when(strftime(CreationDate,format = '%Y')=='2021' ~ 'new',strftime(CreationDate,format = '%Y')=='2020' ~ 'new',TRUE ~ 'old'))%>%
+                           group_by(PostId,VoteDate)%>%
+                           summarise(Total=n())
+                         
+                         VotesByAge2<- VotesByAge%>%
+                           mutate(NewVotes=case_when(VoteDate=='new'~Total,TRUE~as.integer(0)))%>%
+                           mutate(OldVotes=case_when(VoteDate=='old'~Total,TRUE~as.integer(0)))%>%
+                           group_by(PostId)%>%
+                           summarise(Votes=sum(Total),NewVotes=max(NewVotes),OldVotes=max(OldVotes))%>%
+                           filter(NewVotes==0)%>%
+                           arrange(desc(OldVotes))
+                         
+                         T5Dplyr <- Posts%>%
+                           filter(PostTypeId==1)%>%
+                           inner_join(select(VotesByAge2,PostId,OldVotes),by=c("Id"="PostId"))%>%
+                           select(Title,OldVotes)%>%
+                           arrange(desc(OldVotes))%>%
+                           head(10)},
+                         table = {VotesByAgeTable<- votes[VoteTypeId==1 | VoteTypeId==2 | VoteTypeId==5,,]
+                         VotesByAgeTable<-VotesByAgeTable[,VoteDate := fcase(strftime(CreationDate,format = '%Y')=='2021','new',strftime(CreationDate,format = '%Y')=='2020','new',default = 'old'),]
+                         
+                         VotesByAgeTable <- VotesByAgeTable[,list(Total=.N),by=list(PostId,VoteDate)]
+                         
+                         VotesByAgeTable2 <- VotesByAgeTable[,list(NewVotes=max(fcase(VoteDate=='new',Total,default = as.integer(0))),OldVotes=max(fcase(VoteDate=='old',Total,default = as.integer(0))),Votes=sum(Total)),by=list(PostId)]
+                         
+                         VotesByAgeTable2 <- VotesByAgeTable2[NewVotes==0,,]
+                         
+                         postsTask5 <- posts[PostTypeId==1,list(Title,Id),]
+                         
+                         outerTable5 <- VotesByAgeTable2[postsTask5,on=list(PostId==Id),nomatch=0]
+                         
+                         outerTable5<-outerTable5[order(-OldVotes),list(Title,OldVotes),]
+                         
+                         outerTable5<-head(outerTable5,10)}
+)
+
