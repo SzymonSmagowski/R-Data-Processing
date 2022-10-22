@@ -5,6 +5,7 @@ Changing SQL queries to R language on 3 ways:
 3. data frame
 
 Queries may be overcomplicated, so my task is also to simplify them.
+In order to highly upgrade the solution I should use the same variables or clear them at least.
 # Queries:
 # -- 1 --
 SELECT
