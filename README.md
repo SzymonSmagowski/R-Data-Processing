@@ -7,6 +7,10 @@ Changing SQL queries to R language on 3 ways:
 Queries may be overcomplicated, so my task is also to simplify them.
 
 In order to highly upgrade the solution I should use the same variables or clear them at least.
+
+Data is available somewhere here - https://travel.stackexchange.com/
+
+Can't put it here because of the size.
 # Queries:
 # -- 1 --
 SELECT
