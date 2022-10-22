@@ -11,6 +11,8 @@ In order to highly upgrade the solution I should use the same variables or clear
 Data is available somewhere here - https://travel.stackexchange.com/
 
 Can't put it here because of the size.
+
+As a bonus there are some sql queries written in R about flight data analysis.
 # Queries:
 # -- 1 --
 SELECT
